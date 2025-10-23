@@ -177,9 +177,11 @@ if uploaded_file:
             row = df_raw.iloc[r_index].tolist()
             pairs = []
 
+            # Nome do usuário
             user_name = normalize_value(row[2]) if len(row) > 2 else "-"
             pairs.append(("Usuário:", user_name))
 
+            # Loop geral para perguntas e respostas
             i = 0
             while i < len(row):
                 val = row[i]
@@ -207,6 +209,14 @@ if uploaded_file:
                 else:
                     i += 1
 
+            # ===== Novo campo da planilha (DZ e EA) =====
+            if len(row) > 131:
+                label_dz = normalize_value(row[130])
+                value_ea = normalize_value(row[131])
+                if label_dz or value_ea:
+                    pairs.append((label_dz, value_ea if value_ea else "-"))
+
+            # ===== Geração do PDF individual =====
             reg_id = normalize_value(row[0]) if len(row) > 0 else f"registro_{r_index - 1}"
             pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
 
