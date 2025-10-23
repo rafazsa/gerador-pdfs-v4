@@ -144,13 +144,11 @@ def make_qa_table(pairs, pairs_per_row, available_width):
 
     formatted_pairs = []
     for q, a in pairs:
-        # Pergunta
         if isinstance(q, (Paragraph, Image)):
             q_par = q
         else:
             q_par = Paragraph(str(q) if q is not None else "-", styles["Q"])
 
-        # Resposta
         if isinstance(a, (Paragraph, Image)):
             a_par = a
         else:
@@ -234,13 +232,12 @@ def extract_products_and_rest(pairs, max_products=11):
             continue
         i += 1
 
-    # Demais pares que não foram usados nos blocos de produto — manter CRU (sem Paragraph aqui)
+    # Demais pares não usados nos blocos de produto — manter CRU (sem Paragraph aqui)
     for idx, (q, a) in enumerate(pairs):
         if idx in used_idx:
             continue
         rest.append((q, a))
 
-    # Ordenar por número do produto (caso venham fora de ordem)
     products.sort(key=lambda d: d["n"])
     return products, rest
 
@@ -335,20 +332,21 @@ if uploaded_file:
             story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
             avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
 
-            # Blocos de produto
-            if products:
-                story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
-                for p in products:
-                    block_tbl = make_product_block_table(p["items"], avail_w)
-                    story.append(block_tbl)
-                    story.append(Spacer(1, PRODUCT_SPACER))  # pequeno espaço entre blocos
-                story.append(Spacer(1, PRODUCT_SPACER))      # espaço após o último bloco
-
-            # Demais questões
+            # (1) Demais questões primeiro
             if rest_pairs:
                 story.append(Paragraph("Perguntas e Respostas (demais campos)", styles["SectionTitle"]))
                 qa_table = make_qa_table(rest_pairs, 2, avail_w)
                 story += [qa_table, Spacer(1, 3)]
+
+            # (2) Depois os blocos de produto
+            if products:
+                story.append(Spacer(1, PRODUCT_SPACER))  # separação
+                story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
+                for p in products:
+                    block_tbl = make_product_block_table(p["items"], avail_w)
+                    story.append(block_tbl)
+                    story.append(Spacer(1, PRODUCT_SPACER))  # espaço entre blocos
+                story.append(Spacer(1, PRODUCT_SPACER))      # espaço final após o último produto
 
             doc = SimpleDocTemplate(
                 pdf_file_name,
@@ -376,3 +374,4 @@ if uploaded_file:
                 file_name="relatorios_individuais.zip",
                 mime="application/zip"
             )
+
