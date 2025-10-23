@@ -18,11 +18,6 @@ if uploaded_file:
 
     st.success(f"Arquivo carregado com {df.shape[0]} respostas e {df.shape[1]} colunas.")
 
-    # Garante que há número par de colunas (pares pergunta/resposta)
-    if df.shape[1] % 2 != 0:
-        st.warning("Número ímpar de colunas detectado — última coluna será ignorada.")
-        df = df.iloc[:, :-1]
-
     # Gera o PDF
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -38,25 +33,29 @@ if uploaded_file:
         # percorre de 2 em 2 (pergunta / resposta)
         for col in range(0, len(row), 2):
             pergunta = str(row[col]) if pd.notna(row[col]) else ""
-            resposta = str(row[col+1]) if pd.notna(row[col+1]) else ""
+            resposta = ""
+
+            # evita erro se não houver a coluna de resposta correspondente
+            if col + 1 < len(row):
+                resposta = str(row[col + 1]) if pd.notna(row[col + 1]) else ""
 
             # ignora células totalmente vazias
             if not pergunta.strip() and not resposta.strip():
                 continue
 
-            # quebra linha se faltar espaço na página
+            # quebra página se o espaço estiver acabando
             if y < 2*cm:
                 pdf.showPage()
                 y = height - 2*cm
                 pdf.setFont("Helvetica", 10)
 
-            # escreve pergunta
+            # pergunta
             pdf.setFillColor(colors.black)
             pdf.setFont("Helvetica-Bold", 9)
             pdf.drawString(2*cm, y, f"{pergunta}:")
             y -= 0.4*cm
 
-            # escreve resposta
+            # resposta
             pdf.setFont("Helvetica", 9)
             pdf.setFillColor(colors.darkgray)
             text = pdf.beginText(2.5*cm, y)
@@ -79,4 +78,4 @@ if uploaded_file:
         mime="application/pdf"
     )
 
-    st.success("PDF gerado com sucesso, incluindo perguntas e respostas (DZ e EA).")
+    st.success("PDF gerado com sucesso, incluindo todas as perguntas e respostas (inclusive DZ e EA).")
