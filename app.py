@@ -6,6 +6,7 @@ import requests
 import math
 import os
 import zipfile
+import re
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -35,6 +36,10 @@ LOGO_HEIGHT_MM = 15.0
 IMG_MAX_W = 130 * mm
 IMG_MAX_H = 70 * mm
 SIGNATURE_MAX_H = 25 * mm
+
+PRODUCT_BLOCK_BG = colors.HexColor("#F8FAFC")  # fundo suave no bloco
+PRODUCT_BLOCK_BORDER = colors.HexColor("#CBD5E1")  # borda suave
+PRODUCT_SPACER = 4 * mm  # espaço pequeno entre blocos
 
 # ===================== ESTILOS =====================
 styles = getSampleStyleSheet()
@@ -97,6 +102,7 @@ def fetch_image(url, max_w=None, max_h=None, align_center=False):
 
 def is_url(s): return isinstance(s, str) and s.strip().lower().startswith("http")
 def looks_like_label(s): return isinstance(s, str) and ":" in s
+
 def normalize_value(v):
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return ""
@@ -123,6 +129,7 @@ def make_qa_table(pairs, pairs_per_row, available_width):
     for _ in range(pairs_per_row):
         widths += [available_width * (q_frac/pair_unit) / pairs_per_row,
                    available_width * (a_frac/pair_unit) / pairs_per_row]
+
     header = []
     for _ in range(pairs_per_row): header += ["Pergunta", "Resposta"]
 
@@ -147,6 +154,100 @@ def make_qa_table(pairs, pairs_per_row, available_width):
         ("RIGHTPADDING", (0,0), (-1,-1), 3),
         ("TOPPADDING", (0,0), (-1,-1), 2),
         ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+    ]))
+    return table
+
+# --------- NOVO: extração dos blocos de produtos ---------
+PRODUCT_REGEX = re.compile(r"^produto\s*(\d+)\s*:\s*$", re.IGNORECASE)
+
+EXPECTED_PRODUCT_FIELDS = [
+    "Produto {n}:",
+    "Lote:",
+    "Dose (ml/100kg):",
+    "Utilizado (ml total):",
+]
+
+def extract_products_and_rest(pairs, max_products=11):
+    """
+    Varre a lista de (label, value) e separa:
+      - products: lista de dicts, um por produto {n, items=[(q,a),...]}
+      - rest: lista de (q,a) que não pertencem aos blocos de produto
+    É tolerante à ordem (pega campos do produto até antes do próximo produto ou fim).
+    """
+    products = []
+    rest = []
+    i = 0
+    used_idx = set()
+    # Mapear rapidamente para busca local
+    total = len(pairs)
+
+    while i < total:
+        q, a = pairs[i]
+        m = PRODUCT_REGEX.match(str(q).strip())
+        if m and len(products) < max_products:
+            n = int(m.group(1))
+            # Inicializa o bloco com as 4 perguntas esperadas
+            expected_labels = [lbl.format(n=n) for lbl in EXPECTED_PRODUCT_FIELDS]
+            collected = {lbl: None for lbl in expected_labels}
+            # O título "Produto n:" já temos
+            collected[expected_labels[0]] = a
+            used_idx.add(i)
+
+            # Coleta sequencialmente até achar próximo produto ou acabar
+            j = i + 1
+            while j < total:
+                qj, aj = pairs[j]
+                if PRODUCT_REGEX.match(str(qj).strip()):
+                    break  # próximo produto
+                # Se for um dos campos esperados deste produto, coleta
+                if str(qj).strip() in expected_labels[1:]:
+                    collected[str(qj).strip()] = aj
+                    used_idx.add(j)
+                j += 1
+
+            # Constrói a lista final de itens mantendo a ordem definida
+            items = []
+            for lbl in expected_labels:
+                val = collected[lbl]
+                lbl_par = Paragraph(lbl, styles["Q"])
+                if isinstance(val, Image):
+                    items.append((lbl_par, val))
+                else:
+                    items.append((lbl_par, Paragraph((val if val else "-"), styles["A"])))
+            products.append({"n": n, "items": items})
+            i = j
+            continue
+        i += 1
+
+    # Tudo que não foi usado em blocos de produto vai para o restante
+    for idx, (q, a) in enumerate(pairs):
+        if idx in used_idx:
+            continue
+        q_par = Paragraph(q, styles["Q"])
+        a_par = a if isinstance(a, Image) else Paragraph(a if a else "-", styles["A"])
+        rest.append((q_par, a_par))
+
+    # Ordena os produtos por número (caso apareçam fora de ordem)
+    products.sort(key=lambda d: d["n"])
+    return products, rest
+
+def make_product_block_table(product_items, available_width):
+    """
+    Cria um bloco (tabela 2 col) para um único produto.
+    Sem cabeçalho; 4 linhas: Produto n, Lote, Dose, Utilizado.
+    """
+    q_frac, a_frac = 0.35, 0.65
+    widths = [available_width * q_frac, available_width * a_frac]
+    table = Table(product_items, colWidths=widths, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.7, PRODUCT_BLOCK_BORDER),
+        ("INNERGRID", (0,0), (-1,-1), 0.25, PRODUCT_BLOCK_BORDER),
+        ("BACKGROUND", (0,0), (-1,-1), PRODUCT_BLOCK_BG),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
     return table
 
@@ -177,9 +278,11 @@ if uploaded_file:
             row = df_raw.iloc[r_index].tolist()
             pairs = []
 
+            # Exemplo de campo fixo (mantido)
             user_name = normalize_value(row[2]) if len(row) > 2 else "-"
             pairs.append(("Usuário:", user_name))
 
+            # Varredura dinâmica de rótulos/valores
             i = 0
             while i < len(row):
                 val = row[i]
@@ -187,6 +290,7 @@ if uploaded_file:
                     label = normalize_value(val)
                     value_raw = row[i+1]
                     value = normalize_value(value_raw).replace("\n", "").replace("\r", "").strip()
+
                     is_image_field = any(x.lower() in label.lower() for x in [
                         "foto 1: semente tratada e não tratada",
                         "foto 2: embalagem dos produtos",
@@ -207,13 +311,32 @@ if uploaded_file:
                 else:
                     i += 1
 
+            # ===== NOVO: separar blocos de produto e demais =====
+            products, rest_pairs = extract_products_and_rest(pairs, max_products=11)
+
+            # ===== Montagem do PDF =====
             reg_id = normalize_value(row[0]) if len(row) > 0 else f"registro_{r_index - 1}"
             pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
 
             story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
             avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
-            qa_table = make_qa_table(pairs, 2, avail_w)
-            story += [Paragraph("Perguntas e Respostas", styles["SectionTitle"]), qa_table, Spacer(1, 3)]
+
+            # Blocos de produto
+            if products:
+                story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
+                for p in products:
+                    block_tbl = make_product_block_table(p["items"], avail_w)
+                    story.append(block_tbl)
+                    story.append(Spacer(1, PRODUCT_SPACER))  # pequeno espaço entre blocos
+
+                # Pequeno espaço após o último produto antes das demais questões
+                story.append(Spacer(1, PRODUCT_SPACER))
+
+            # Demais questões
+            if rest_pairs:
+                story.append(Paragraph("Perguntas e Respostas (demais campos)", styles["SectionTitle"]))
+                qa_table = make_qa_table(rest_pairs, 2, avail_w)
+                story += [qa_table, Spacer(1, 3)]
 
             doc = SimpleDocTemplate(
                 pdf_file_name,
