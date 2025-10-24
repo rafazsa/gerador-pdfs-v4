@@ -7,6 +7,7 @@ import math
 import os
 import zipfile
 import re
+import unicodedata
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -37,9 +38,9 @@ IMG_MAX_W = 130 * mm
 IMG_MAX_H = 70 * mm
 SIGNATURE_MAX_H = 25 * mm
 
-# Estilo dos blocos de produto
-PRODUCT_BLOCK_BG = colors.HexColor("#F8FAFC")
-PRODUCT_BLOCK_BORDER = colors.HexColor("#CBD5E1")
+# Estilo dos blocos (produtos e grupos)
+BLOCK_BG = colors.HexColor("#F8FAFC")
+BLOCK_BORDER = colors.HexColor("#CBD5E1")
 PRODUCT_SPACER = 4 * mm  # pequeno espaço entre blocos
 
 # ===================== ESTILOS =====================
@@ -59,6 +60,14 @@ styles.add(ParagraphStyle(
 styles.add(ParagraphStyle(
     name="A", parent=styles["Normal"], fontName=BASE_FONT,
     fontSize=8.6, leading=10.2, textColor=colors.HexColor("#111827")
+))
+styles.add(ParagraphStyle(
+    name="LabelSmall", parent=styles["Normal"], fontName=BASE_FONT,
+    fontSize=7.8, leading=9.6, textColor=colors.HexColor("#4B5563")
+))
+styles.add(ParagraphStyle(
+    name="Value", parent=styles["Normal"], fontName=BASE_FONT,
+    fontSize=9.0, leading=11, textColor=colors.HexColor("#111827")
 ))
 
 # ===================== FUNÇÕES AUXILIARES =====================
@@ -105,7 +114,8 @@ def is_url(s):
     return isinstance(s, str) and s.strip().lower().startswith("http")
 
 def looks_like_label(s): 
-    return isinstance(s, str) and ":" in s
+    # Considera rótulos que contenham ':' ou '?' (pergunta ou rótulo tradicional)
+    return isinstance(s, str) and (":" in s or "?" in s)
 
 def normalize_value(v):
     if v is None or (isinstance(v, float) and math.isnan(v)):
@@ -113,6 +123,24 @@ def normalize_value(v):
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
     return str(v).strip()
+
+def strip_accents(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
+
+def canonical_key(label: str) -> str:
+    if label is None:
+        return ""
+    s = str(label).strip().lower()
+    s = s.replace("?", ":")  # normaliza "Pergunta?" para "Pergunta:"
+    s = s.replace(" :", ":")
+    if s.endswith(":"):
+        s = s[:-1]
+    s = strip_accents(s)
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 def pack_pairs_into_rows(pairs, pairs_per_row):
     rows, line = [], []
@@ -129,7 +157,7 @@ def pack_pairs_into_rows(pairs, pairs_per_row):
 def make_qa_table(pairs, pairs_per_row, available_width):
     """
     Cria tabela de Q&A. Aceita q/a como strings ou flowables (Paragraph/Image).
-    Evita "duplo wrap" e o erro de Paragraph.split().
+    Idempotente: se já for Paragraph/Image, usa direto.
     """
     q_frac, a_frac = 0.35, 0.65
     pair_unit = q_frac + a_frac
@@ -144,17 +172,12 @@ def make_qa_table(pairs, pairs_per_row, available_width):
 
     formatted_pairs = []
     for q, a in pairs:
-        if isinstance(q, (Paragraph, Image)):
-            q_par = q
-        else:
-            q_par = Paragraph(str(q) if q is not None else "-", styles["Q"])
-
+        q_par = q if isinstance(q, (Paragraph, Image)) else Paragraph(str(q) if q is not None else "-", styles["Q"])
         if isinstance(a, (Paragraph, Image)):
             a_par = a
         else:
             a_txt = str(a) if a is not None and str(a).strip() != "" else "-"
             a_par = Paragraph(a_txt, styles["A"])
-
         formatted_pairs.append((q_par, a_par))
 
     data_rows = pack_pairs_into_rows(formatted_pairs, pairs_per_row)
@@ -216,7 +239,7 @@ def extract_products_and_rest(pairs, max_products=11):
                     used_idx.add(j)
                 j += 1
 
-            # Monta os itens do bloco (como flowables) na ordem esperada
+            # Monta os itens do bloco (flowables) na ordem esperada
             items = []
             for lbl in expected_labels:
                 val = collected[lbl]
@@ -232,7 +255,7 @@ def extract_products_and_rest(pairs, max_products=11):
             continue
         i += 1
 
-    # Demais pares não usados nos blocos de produto — manter CRU (sem Paragraph aqui)
+    # Demais pares não usados nos blocos de produto — manter CRU
     for idx, (q, a) in enumerate(pairs):
         if idx in used_idx:
             continue
@@ -243,16 +266,15 @@ def extract_products_and_rest(pairs, max_products=11):
 
 def make_product_block_table(product_items, available_width):
     """
-    Cria um bloco (tabela 2 col) para um único produto.
-    Sem cabeçalho; 4 linhas: Produto n, Lote, Dose, Utilizado.
+    Bloco (tabela 2 col) para um único produto.
     """
     q_frac, a_frac = 0.35, 0.65
     widths = [available_width * q_frac, available_width * a_frac]
     table = Table(product_items, colWidths=widths, hAlign="LEFT")
     table.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.7, PRODUCT_BLOCK_BORDER),
-        ("INNERGRID", (0,0), (-1,-1), 0.25, PRODUCT_BLOCK_BORDER),
-        ("BACKGROUND", (0,0), (-1,-1), PRODUCT_BLOCK_BG),
+        ("BOX", (0,0), (-1,-1), 0.7, BLOCK_BORDER),
+        ("INNERGRID", (0,0), (-1,-1), 0.25, BLOCK_BORDER),
+        ("BACKGROUND", (0,0), (-1,-1), BLOCK_BG),
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
         ("LEFTPADDING", (0,0), (-1,-1), 4),
         ("RIGHTPADDING", (0,0), (-1,-1), 4),
@@ -260,6 +282,136 @@ def make_product_block_table(product_items, available_width):
         ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
     return table
+
+# --------- NOVO: grupos de informações gerais ---------
+# Definição dos grupos (ordem e rótulos)
+GROUPS = [
+    ["Data", "Máquina TS", "Supervisor OTM"],
+    ["Canal", "Cidade", "UF", "Consultor Responsável"],
+    ["Empresa Contratante", "Produtor", "Telefone do Produtor", "Cidade", "UF"],
+    ["Cultura", "Variedade", "Lote", "Empresa", "Tipo", "Peso Total"],
+]
+
+# Mapeamento para chaves canônicas (para lidar com acentos e variações)
+SYNONYMS = {
+    "data": ["data", "data aplicação", "data do ts", "data da aplicação"],
+    "maquina ts": ["maquina ts", "máquina ts", "maquina de ts"],
+    "supervisor otm": ["supervisor otm", "supervisor", "otm supervisor"],
+
+    "canal": ["canal"],
+    "cidade": ["cidade", "municipio", "município"],
+    "uf": ["uf", "estado", "sigla uf"],
+    "consultor responsavel": ["consultor responsavel", "consultor responsável", "responsavel tecnico", "responsável técnico"],
+
+    "empresa contratante": ["empresa contratante", "contratante"],
+    "produtor": ["produtor", "nome do produtor"],
+    "telefone do produtor": ["telefone do produtor", "telefone produtor", "telefone"],
+    # cidade/uf já mapeados
+    "cultura": ["cultura"],
+    "variedade": ["variedade", "cultivar"],
+    "lote": ["lote", "lote geral"],
+    "empresa": ["empresa", "empresa ts", "empresa executora"],
+    "tipo": ["tipo"],
+    "peso total": ["peso total", "peso", "peso total (kg)"],
+}
+
+def canon_from_display(label: str) -> str:
+    # ex.: "Consultor Responsável" -> "consultor responsavel"
+    return canonical_key(label)
+
+def key_matches(label_in_sheet: str, wanted_display_label: str) -> bool:
+    """
+    Compara um rótulo da planilha com o rótulo desejado do grupo,
+    usando sinônimos canônicos e ignorando acentos/caixa.
+    """
+    key = canonical_key(label_in_sheet)
+    target = canon_from_display(wanted_display_label)
+    # lista de sinônimos para o alvo
+    syns = SYNONYMS.get(target, [target])
+    syns = [canonical_key(s) for s in syns]
+    return key in syns
+
+def build_lookup(pairs):
+    """
+    Constrói um índice {idx: (q,a)} e também um lookup por chave canônica -> lista de índices.
+    Mantém múltiplas entradas (ex.: 'Cidade' aparece em 2 grupos).
+    """
+    index = {i: (q, a) for i, (q, a) in enumerate(pairs)}
+    pockets = {}
+    for i, (q, a) in index.items():
+        k = canonical_key(str(q))
+        pockets.setdefault(k, []).append(i)
+    return index, pockets
+
+def pop_first_matching(index, pockets, wanted_display_label):
+    """
+    Encontra e remove do 'index/pockets' a primeira ocorrência que combine com o rótulo desejado (por sinônimos).
+    Retorna (label_original, value) ou (None, None) se não achar.
+    """
+    target = canon_from_display(wanted_display_label)
+    syns = SYNONYMS.get(target, [target])
+    syns = [canonical_key(s) for s in syns]
+
+    for s in syns:
+        if s in pockets and pockets[s]:
+            idx = pockets[s].pop(0)
+            q, a = index.pop(idx, (None, None))
+            # esvaziar referência cruzada
+            if not pockets[s]:
+                pockets.pop(s, None)
+            return q, a
+    return None, None
+
+def make_inline_group_block(labels_order, index, pockets, available_width):
+    """
+    Cria um bloco único (borda+fundo) com 2 linhas:
+      - Linha 1: rótulos (LabelSmall)
+      - Linha 2: valores (Value)
+    Número de colunas = len(labels_order).
+    Cada célula da 2ª linha aceita Paragraph/Image; se não houver, coloca '-'.
+    """
+    n = len(labels_order)
+    if n == 0:
+        return None, []
+
+    # pega valores na ordem, removendo do lookup
+    original_pairs = []
+    values = []
+    used_idxs = []
+    for lbl in labels_order:
+        q, a = pop_first_matching(index, pockets, lbl)
+        original_pairs.append((q, a))
+        values.append(a)
+
+    # widths: colunas iguais
+    col_w = available_width / n
+    col_widths = [col_w for _ in range(n)]
+
+    # linha 1: rótulos visuais (os nomes desejados, uniformes)
+    top_row = [Paragraph(lbl, styles["LabelSmall"]) for lbl in labels_order]
+
+    # linha 2: valores
+    bottom_row = []
+    for a in values:
+        if isinstance(a, (Paragraph, Image)):
+            bottom_row.append(a)
+        else:
+            a_txt = str(a).strip() if a is not None and str(a).strip() != "" else "-"
+            bottom_row.append(Paragraph(a_txt, styles["Value"]))
+
+    tbl = Table([top_row, bottom_row], colWidths=col_widths, hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.7, BLOCK_BORDER),
+        ("INNERGRID", (0,0), (-1,-1), 0.25, BLOCK_BORDER),
+        ("BACKGROUND", (0,0), (-1,-1), BLOCK_BG),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+    ]))
+    # retorna a tabela e os pares originais (para referência, se necessário)
+    return tbl, original_pairs
 
 # ===================== INTERFACE STREAMLIT =====================
 st.set_page_config(page_title="Gerador de Relatórios Geodata", layout="centered")
@@ -288,7 +440,7 @@ if uploaded_file:
             row = df_raw.iloc[r_index].tolist()
             pairs = []
 
-            # Exemplo de campo fixo
+            # Campo fixo de exemplo
             user_name = normalize_value(row[2]) if len(row) > 2 else "-"
             pairs.append(("Usuário:", user_name))
 
@@ -322,8 +474,12 @@ if uploaded_file:
                 else:
                     i += 1
 
-            # Separar blocos de produto (1..11) e demais perguntas
+            # 1) Separar blocos de produto (1..11) e demais perguntas
             products, rest_pairs = extract_products_and_rest(pairs, max_products=11)
+
+            # 2) Dentro de "demais perguntas", organizar os grupos pedidos
+            #    Construímos um lookup para ir consumindo os rótulos usados nos grupos
+            index, pockets = build_lookup(rest_pairs)
 
             # ===== Montagem do PDF =====
             reg_id = normalize_value(row[0]) if len(row) > 0 else f"registro_{r_index - 1}"
@@ -332,15 +488,23 @@ if uploaded_file:
             story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
             avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
 
-            # (1) Demais questões primeiro
-            if rest_pairs:
+            # (A) Grupos visuais das "demais informações"
+            story.append(Paragraph("Informações Gerais", styles["SectionTitle"]))
+            for group in GROUPS:
+                tbl, used_pairs = make_inline_group_block(group, index, pockets, avail_w)
+                if tbl:
+                    story.append(tbl)
+                    story.append(Spacer(1, PRODUCT_SPACER))
+
+            # (B) O que sobrar das "demais informações" vai para Q&A padrão
+            remaining_pairs = list(index.values())  # ainda crus
+            if remaining_pairs:
                 story.append(Paragraph("Perguntas e Respostas (demais campos)", styles["SectionTitle"]))
-                qa_table = make_qa_table(rest_pairs, 2, avail_w)
+                qa_table = make_qa_table(remaining_pairs, 2, avail_w)
                 story += [qa_table, Spacer(1, 3)]
 
-            # (2) Depois os blocos de produto
+            # (C) Depois os blocos de produto
             if products:
-                story.append(Spacer(1, PRODUCT_SPACER))  # separação
                 story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
                 for p in products:
                     block_tbl = make_product_block_table(p["items"], avail_w)
@@ -374,4 +538,5 @@ if uploaded_file:
                 file_name="relatorios_individuais.zip",
                 mime="application/zip"
             )
+
 
