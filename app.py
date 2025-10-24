@@ -484,7 +484,7 @@ if uploaded_file:
             # (B) O que sobrar das "demais informações" vai para Q&A padrão
             remaining_pairs = list(index.values())  # ainda crus
             if remaining_pairs:
-                story.append(Paragraph("Perguntas e Respostas (demais campos)", styles["SectionTitle"]))
+                story.append(Paragraph("Detalhes", styles["SectionTitle"]))
                 qa_table = make_qa_table(remaining_pairs, 2, avail_w)
                 story += [qa_table, Spacer(1, 3)]
 
@@ -523,5 +523,6 @@ if uploaded_file:
                 file_name="relatorios_individuais.zip",
                 mime="application/zip"
             )
+
 
 
