@@ -400,8 +400,8 @@ def make_inline_group_block(labels_order, index, pockets, available_width):
     return tbl, original_pairs
 
 # ===================== INTERFACE STREAMLIT =====================
-st.set_page_config(page_title="Gerador de Relatórios AgriReport", layout="centered")
-st.title("📄 Gerador de Relatórios PDF - AgriReport")
+st.set_page_config(page_title="Gerador de Relatórios OTM", layout="centered")
+st.title("📄 Gerador de Relatórios PDF - OTM")
 st.caption("Gera um PDF individual por registro da planilha Excel.")
 
 uploaded_file = st.file_uploader("Faça upload do arquivo Excel (.xlsx)", type=["xlsx"])
@@ -523,6 +523,7 @@ if uploaded_file:
                 file_name="relatorios_individuais.zip",
                 mime="application/zip"
             )
+
 
 
 
