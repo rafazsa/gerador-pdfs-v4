@@ -32,7 +32,7 @@ MARGIN_BOTTOM_MM = 18.0
 MARGIN_SIDE_MM = 14.0
 
 REPORT_TITLE = "Tratamento de Sementes (Resumo por Registro)"
-LOGO_URL = "https://report.geodata.com.br/customers/picture/16?time=1759945360"
+LOGO_URL = "https://app.agrireport.agr.br/customers/picture/16?time=1759945360"
 LOGO_HEIGHT_MM = 15.0
 IMG_MAX_W = 130 * mm
 IMG_MAX_H = 70 * mm
@@ -404,128 +404,145 @@ st.set_page_config(page_title="Gerador de Relatórios OTM", layout="centered")
 st.title("📄 Gerador de Relatórios PDF - OTM")
 st.caption("Gera um PDF individual por registro da planilha Excel.")
 
+# Caminho do arquivo de exemplo que você enviou (usado apenas se não fizer upload)
+sample_path = "/mnt/data/Questionario_Guia_de_TS_V4 (6).xlsx"
+
 uploaded_file = st.file_uploader("Faça upload do arquivo Excel (.xlsx)", type=["xlsx"])
 
-if uploaded_file:
-    df_raw = pd.read_excel(uploaded_file, header=None)
-    if df_raw.shape[0] < 3:
-        st.error("Planilha inesperada: preciso de pelo menos 3 linhas (título, cabeçalho e dados).")
+# Se não houver upload, tenta usar o arquivo de exemplo
+if uploaded_file is None and os.path.exists(sample_path):
+    st.info("Nenhum arquivo enviado — usando arquivo de exemplo presente no ambiente.")
+    df_raw = pd.read_excel(sample_path, header=None)
+else:
+    if uploaded_file:
+        df_raw = pd.read_excel(uploaded_file, header=None)
+    else:
+        st.info("Aguardando upload do Excel...")
         st.stop()
 
-    st.success(f"✅ Arquivo carregado com {df_raw.shape[0]-2} registros.")
+# Verificação básica
+if df_raw.shape[0] < 3:
+    st.error("Planilha inesperada: preciso de pelo menos 3 linhas (título, cabeçalho e dados).")
+    st.stop()
 
-    if st.button("🚀 Gerar PDFs"):
-        output_dir = "relatorios_individuais"
-        os.makedirs(output_dir, exist_ok=True)
-        generated_files = []
+st.success(f"✅ Arquivo carregado com {df_raw.shape[0]-2} registros.")
 
-        progress = st.progress(0)
-        total = df_raw.shape[0] - 2
+if st.button("🚀 Gerar PDFs"):
+    output_dir = "relatorios_individuais"
+    os.makedirs(output_dir, exist_ok=True)
+    generated_files = []
 
-        for idx, r_index in enumerate(range(2, df_raw.shape[0]), 1):
-            row = df_raw.iloc[r_index].tolist()
-            pairs = []
+    progress = st.progress(0)
+    total = df_raw.shape[0] - 2
 
-            # Campo fixo de exemplo
-            user_name = normalize_value(row[2]) if len(row) > 2 else "-"
-            pairs.append(("Usuário:", user_name))
+    # Percorre as linhas de dados (a partir da linha 2, como no seu código original)
+    for idx, r_index in enumerate(range(2, df_raw.shape[0]), 1):
+        row_full_series = df_raw.iloc[r_index]
+        # Converte para lista para indexação mais direta
+        row_full = row_full_series.tolist()
 
-            # Varredura dinâmica de rótulos/valores
-            i = 0
-            while i < len(row):
-                val = row[i]
-                if looks_like_label(val) and i + 1 < len(row):
-                    label = normalize_value(val)
-                    value_raw = row[i+1]
-                    value = normalize_value(value_raw).replace("\n", "").replace("\r", "").strip()
+        # REG_ID e outros campos que existem antes da coluna J devem ser lidos da linha completa
+        reg_id = normalize_value(row_full[4]) if len(row_full) > 0 else f"registro_{r_index - 1}"
+        pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
 
-                    # Campos de imagem conhecidos
-                    is_image_field = any(x.lower() in label.lower() for x in [
-                        "foto 1: semente tratada e não tratada",
-                        "foto 2: embalagem dos produtos",
-                        "assinatura do produtor ou responsável"
-                    ])
+        pairs = []
 
-                    if is_image_field and is_url(value):
-                        if "assinatura" in label.lower():
-                            img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=SIGNATURE_MAX_H, align_center=True)
-                        else:
-                            img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=IMG_MAX_H)
-                        pairs.append((label, img_obj if img_obj else value))
-                        i += 2
-                        continue
+        # Campo fixo de exemplo (mantendo posição original: coluna C -> índice 2)
+        user_name = normalize_value(row_full[2]) if len(row_full) > 2 else "-"
+        pairs.append(("Usuário:", user_name))
 
-                    pairs.append((label, value if value else "-"))
+        # --- AQUI: lemos apenas a partir da coluna J (índice 9) para montar os pares Q/A ---
+        row_data = row_full[9:] if len(row_full) > 9 else []
+
+        # Varredura dinâmica de rótulos/valores em row_data
+        i = 0
+        while i < len(row_data):
+            val = row_data[i]
+            if looks_like_label(val) and i + 1 < len(row_data):
+                label = normalize_value(val)
+                value_raw = row_data[i+1]
+                value = normalize_value(value_raw).replace("\n", "").replace("\r", "").strip()
+
+                # Campos de imagem conhecidos
+                is_image_field = any(x.lower() in label.lower() for x in [
+                    "foto 1: semente tratada e não tratada",
+                    "foto 2: embalagem dos produtos",
+                    "assinatura do produtor ou responsável"
+                ])
+
+                if is_image_field and is_url(value):
+                    if "assinatura" in label.lower():
+                        img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=SIGNATURE_MAX_H, align_center=True)
+                    else:
+                        img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=IMG_MAX_H)
+                    pairs.append((label, img_obj if img_obj else value))
                     i += 2
-                else:
-                    i += 1
+                    continue
 
-            # 1) Separar blocos de produto (1..11) e demais perguntas
-            products, rest_pairs = extract_products_and_rest(pairs, max_products=11)
+                pairs.append((label, value if value else "-"))
+                i += 2
+            else:
+                i += 1
 
-            # 2) Dentro de "demais perguntas", organizar os grupos pedidos
-            index, pockets = build_lookup(rest_pairs)
+        # 1) Separar blocos de produto (1..11) e demais perguntas
+        products, rest_pairs = extract_products_and_rest(pairs, max_products=11)
 
-            # ===== Montagem do PDF =====
-            reg_id = normalize_value(row[4]) if len(row) > 0 else f"registro_{r_index - 1}"
-            pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
+        # 2) Dentro de "demais perguntas", organizar os grupos pedidos
+        index, pockets = build_lookup(rest_pairs)
 
-            story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
-            avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
+        # ===== Montagem do PDF =====
+        story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
+        avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
 
-            # (A) Grupos visuais das "demais informações"
-            story.append(Paragraph("Informações Gerais", styles["SectionTitle"]))
-            for group in GROUPS:
-                tbl, _ = make_inline_group_block(group, index, pockets, avail_w)
-                if tbl:
-                    story.append(tbl)
-                    story.append(Spacer(1, PRODUCT_SPACER))
-
-            # (B) O que sobrar das "demais informações" vai para Q&A padrão
-            remaining_pairs = list(index.values())  # ainda crus
-            if remaining_pairs:
-                story.append(Paragraph("Detalhes", styles["SectionTitle"]))
-                qa_table = make_qa_table(remaining_pairs, 2, avail_w)
-                story += [qa_table, Spacer(1, 3)]
-
-            # (C) Depois os blocos de produto (apenas os com resposta)
-            if products:
-                story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
-                for p in products:
-                    block_tbl = make_product_block_table(p["items"], avail_w)
-                    story.append(block_tbl)
-                    story.append(Spacer(1, PRODUCT_SPACER))
+        # (A) Grupos visuais das "demais informações"
+        story.append(Paragraph("Informações Gerais", styles["SectionTitle"]))
+        for group in GROUPS:
+            tbl, _ = make_inline_group_block(group, index, pockets, avail_w)
+            if tbl:
+                story.append(tbl)
                 story.append(Spacer(1, PRODUCT_SPACER))
 
-            doc = SimpleDocTemplate(
-                pdf_file_name,
-                pagesize=PAGE_SIZE,
-                leftMargin=MARGIN_SIDE_MM*mm, rightMargin=MARGIN_SIDE_MM*mm,
-                topMargin=MARGIN_TOP_MM*mm, bottomMargin=MARGIN_BOTTOM_MM*mm,
-                title=REPORT_TITLE,
-            )
-            doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
-            generated_files.append(pdf_file_name)
+        # (B) O que sobrar das "demais informações" vai para Q&A padrão
+        remaining_pairs = list(index.values())  # ainda crus
+        if remaining_pairs:
+            story.append(Paragraph("Detalhes", styles["SectionTitle"]))
+            qa_table = make_qa_table(remaining_pairs, 2, avail_w)
+            story += [qa_table, Spacer(1, 3)]
 
-            progress.progress(idx / total)
+        # (C) Depois os blocos de produto (apenas os com resposta)
+        if products:
+            story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
+            for p in products:
+                block_tbl = make_product_block_table(p["items"], avail_w)
+                story.append(block_tbl)
+                story.append(Spacer(1, PRODUCT_SPACER))
+            story.append(Spacer(1, PRODUCT_SPACER))
 
-        if generated_files:
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zf:
-                for file_path in generated_files:
-                    zf.write(file_path, os.path.basename(file_path))
-            zip_buffer.seek(0)
+        doc = SimpleDocTemplate(
+            pdf_file_name,
+            pagesize=PAGE_SIZE,
+            leftMargin=MARGIN_SIDE_MM*mm, rightMargin=MARGIN_SIDE_MM*mm,
+            topMargin=MARGIN_TOP_MM*mm, bottomMargin=MARGIN_BOTTOM_MM*mm,
+            title=REPORT_TITLE,
+        )
+        doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
+        generated_files.append(pdf_file_name)
 
-            st.success(f"{len(generated_files)} PDFs gerados com sucesso!")
-            st.download_button(
-                label="📦 Baixar todos os PDFs (.zip)",
-                data=zip_buffer,
-                file_name="relatorios_individuais.zip",
-                mime="application/zip"
-            )
+        progress.progress(idx / total)
 
+    if generated_files:
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            for file_path in generated_files:
+                zf.write(file_path, os.path.basename(file_path))
+        zip_buffer.seek(0)
 
-
-
-
-
+        st.success(f"{len(generated_files)} PDFs gerados com sucesso!")
+        st.download_button(
+            label="📦 Baixar todos os PDFs (.zip)",
+            data=zip_buffer,
+            file_name="relatorios_individuais.zip",
+            mime="application/zip"
+        )
+    else:
+        st.warning("Nenhum PDF foi gerado.")
