@@ -114,7 +114,6 @@ def is_url(s):
     return isinstance(s, str) and s.strip().lower().startswith("http")
 
 def looks_like_label(s): 
-    # Considera rótulos que contenham ':' ou '?' (pergunta ou rótulo tradicional)
     return isinstance(s, str) and (":" in s or "?" in s)
 
 def normalize_value(v):
@@ -134,7 +133,7 @@ def canonical_key(label: str) -> str:
     if label is None:
         return ""
     s = str(label).strip().lower()
-    s = s.replace("?", ":")  # normaliza "Pergunta?" para "Pergunta:"
+    s = s.replace("?", ":")
     s = s.replace(" :", ":")
     if s.endswith(":"):
         s = s[:-1]
@@ -155,10 +154,6 @@ def pack_pairs_into_rows(pairs, pairs_per_row):
     return rows
 
 def make_qa_table(pairs, pairs_per_row, available_width):
-    """
-    Cria tabela de Q&A. Aceita q/a como strings ou flowables (Paragraph/Image).
-    Idempotente: se já for Paragraph/Image, usa direto.
-    """
     q_frac, a_frac = 0.35, 0.65
     pair_unit = q_frac + a_frac
     widths = []
@@ -182,6 +177,7 @@ def make_qa_table(pairs, pairs_per_row, available_width):
 
     data_rows = pack_pairs_into_rows(formatted_pairs, pairs_per_row)
     table = Table([header] + data_rows, colWidths=widths, hAlign="LEFT", repeatRows=1)
+
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), ACCENT),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
@@ -208,7 +204,6 @@ EXPECTED_PRODUCT_FIELDS = [
 ]
 
 def _is_blank_value(v) -> bool:
-    """Considera vazio quando None, '', '-' (após strip), ou NaN."""
     if v is None:
         return True
     if isinstance(v, float) and math.isnan(v):
@@ -216,16 +211,9 @@ def _is_blank_value(v) -> bool:
     if isinstance(v, Image):
         return False
     s = str(v).strip().lower()
-    return s in ("", "-","n/a","na","null","none")
+    return s in ("", "-", "n/a", "na", "null", "none")
 
 def extract_products_and_rest(pairs, max_products=11):
-    """
-    Separa blocos de produtos (Produto n:, Lote:, Dose..., Utilizado...) do restante.
-    - products: lista de dicts {"n": int, "items": [(Q_flowable, A_flowable), ...]}
-      **Somente produtos com AO MENOS UM valor não-vazio entram.**
-    - rest: lista de (q, a) CRUS (string/flowable) não pertencentes aos blocos.
-      Campos de produtos vazios também são removidos do 'rest' (não aparecem no PDF).
-    """
     products = []
     rest = []
     i = 0
@@ -246,16 +234,15 @@ def extract_products_and_rest(pairs, max_products=11):
             while j < total:
                 qj, aj = pairs[j]
                 if PRODUCT_REGEX.match(str(qj).strip()):
-                    break  # próximo produto
+                    break
                 if str(qj).strip() in expected_labels[1:]:
                     collected[str(qj).strip()] = aj
                     used_idx.add(j)
                 j += 1
 
-            # Checagem de "produto vazio": todos os 4 campos sem conteúdo real
             has_any_answer = any(not _is_blank_value(collected[lbl]) for lbl in expected_labels)
+
             if has_any_answer:
-                # Monta os itens do bloco (flowables) na ordem esperada
                 items = []
                 for lbl in expected_labels:
                     val = collected[lbl]
@@ -265,15 +252,15 @@ def extract_products_and_rest(pairs, max_products=11):
                     elif isinstance(val, Paragraph):
                         items.append((lbl_par, val))
                     else:
-                        items.append((lbl_par, Paragraph((str(val).strip() if not _is_blank_value(val) else "-"), styles["A"])))
+                        txt = (str(val).strip() if not _is_blank_value(val) else "-")
+                        items.append((lbl_par, Paragraph(txt, styles["A"])))
+
                 products.append({"n": n, "items": items})
-            # Se for vazio: não adiciona aos produtos e mantém os índices em used_idx
-            # para não aparecer em "demais campos"
+
             i = j
             continue
         i += 1
 
-    # Demais pares não usados nos blocos de produto — manter CRU
     for idx, (q, a) in enumerate(pairs):
         if idx in used_idx:
             continue
@@ -283,11 +270,9 @@ def extract_products_and_rest(pairs, max_products=11):
     return products, rest
 
 def make_product_block_table(product_items, available_width):
-    """
-    Bloco (tabela 2 col) para um único produto.
-    """
     q_frac, a_frac = 0.35, 0.65
     widths = [available_width * q_frac, available_width * a_frac]
+
     table = Table(product_items, colWidths=widths, hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BOX", (0,0), (-1,-1), 0.7, BLOCK_BORDER),
@@ -301,7 +286,8 @@ def make_product_block_table(product_items, available_width):
     ]))
     return table
 
-# --------- NOVO: grupos de informações gerais ---------
+
+# ===================== GRUPOS DE INFORMAÇÕES =====================
 GROUPS = [
     ["Data", "Máquina TS", "Supervisor OTM"],
     ["Canal", "Cidade", "UF", "Consultor Responsável"],
@@ -399,17 +385,17 @@ def make_inline_group_block(labels_order, index, pockets, available_width):
     ]))
     return tbl, original_pairs
 
+
 # ===================== INTERFACE STREAMLIT =====================
 st.set_page_config(page_title="Gerador de Relatórios OTM", layout="centered")
 st.title("📄 Gerador de Relatórios PDF - OTM")
 st.caption("Gera um PDF individual por registro da planilha Excel.")
 
-# Caminho do arquivo de exemplo que você enviou (usado apenas se não fizer upload)
 sample_path = "/mnt/data/Questionario_Guia_de_TS_V4 (6).xlsx"
 
 uploaded_file = st.file_uploader("Faça upload do arquivo Excel (.xlsx)", type=["xlsx"])
 
-# Se não houver upload, tenta usar o arquivo de exemplo
+# Se não houver upload, tenta usar arquivo de exemplo
 if uploaded_file is None and os.path.exists(sample_path):
     st.info("Nenhum arquivo enviado — usando arquivo de exemplo presente no ambiente.")
     df_raw = pd.read_excel(sample_path, header=None)
@@ -417,132 +403,99 @@ else:
     if uploaded_file:
         df_raw = pd.read_excel(uploaded_file, header=None)
     else:
-        st.info("Aguardando upload do Excel...")
+        st.warning("Envie um arquivo .xlsx para continuar.")
         st.stop()
 
-# Verificação básica
-if df_raw.shape[0] < 3:
-    st.error("Planilha inesperada: preciso de pelo menos 3 linhas (título, cabeçalho e dados).")
+# ===================== PROCESSAMENTO =====================
+
+# Primeira coluna = labels
+labels = df_raw.iloc[:, 0].tolist()
+
+# Demais colunas = registros
+records = df_raw.iloc[:, 1:]
+
+if records.empty:
+    st.error("A planilha não possui registros nas colunas após a primeira.")
     st.stop()
 
-st.success(f"✅ Arquivo carregado com {df_raw.shape[0]-2} registros.")
+st.success(f"{records.shape[1]} registros encontrados — prontos para gerar PDF!")
 
-if st.button("🚀 Gerar PDFs"):
-    output_dir = "relatorios_individuais"
-    os.makedirs(output_dir, exist_ok=True)
-    generated_files = []
+# ===================== GERAR PDF =====================
 
-    progress = st.progress(0)
-    total = df_raw.shape[0] - 2
+if st.button("Gerar PDFs"):
+    zip_buffer = BytesIO()
 
-    # Percorre as linhas de dados (a partir da linha 2, como no seu código original)
-    for idx, r_index in enumerate(range(2, df_raw.shape[0]), 1):
-        row_full_series = df_raw.iloc[r_index]
-        # Converte para lista para indexação mais direta
-        row_full = row_full_series.tolist()
+    with zipfile.ZipFile(zip_buffer, "w") as zipf:
+        for col_index in range(records.shape[1]):
+            col = records.iloc[:, col_index]
 
-        # REG_ID e outros campos que existem antes da coluna J devem ser lidos da linha completa
-        reg_id = normalize_value(row_full[0]) if len(row_full) > 0 else f"registro_{r_index - 1}"
-        pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
+            pairs = []
+            for q, a in zip(labels, col):
+                if is_url(a):
+                    img = fetch_image(a, max_w=IMG_MAX_W, max_h=IMG_MAX_H, align_center=True)
+                    if img:
+                        pairs.append((q, img))
+                        continue
+                pairs.append((q, normalize_value(a)))
 
-        pairs = []
+            products, rest_pairs = extract_products_and_rest(pairs)
 
-        # Campo fixo de exemplo (mantendo posição original: coluna C -> índice 2)
-        user_name = normalize_value(row_full[2]) if len(row_full) > 2 else "-"
-        pairs.append(("Usuário:", user_name))
+            index, pockets = build_lookup(rest_pairs)
 
-        # --- AQUI: lemos apenas a partir da coluna J (índice 9) para montar os pares Q/A ---
-        row_data = row_full[9:] if len(row_full) > 9 else []
+            pdf_buffer = BytesIO()
+            doc = SimpleDocTemplate(
+                pdf_buffer,
+                pagesize=A4,
+                leftMargin=MARGIN_SIDE_MM * mm,
+                rightMargin=MARGIN_SIDE_MM * mm,
+                topMargin=MARGIN_TOP_MM * mm,
+                bottomMargin=MARGIN_BOTTOM_MM * mm
+            )
 
-        # Varredura dinâmica de rótulos/valores em row_data
-        i = 0
-        while i < len(row_data):
-            val = row_data[i]
-            if looks_like_label(val) and i + 1 < len(row_data):
-                label = normalize_value(val)
-                value_raw = row_data[i+1]
-                value = normalize_value(value_raw).replace("\n", "").replace("\r", "").strip()
+            story = []
+            story.append(Paragraph(REPORT_TITLE, styles["ReportTitle"]))
+            story.append(Spacer(1, 4*mm))
 
-                # Campos de imagem conhecidos
-                is_image_field = any(x.lower() in label.lower() for x in [
-                    "foto 1: semente tratada e não tratada",
-                    "foto 2: embalagem dos produtos",
-                    "assinatura do produtor ou responsável"
-                ])
+            available_width = PAGE_W - 2*(MARGIN_SIDE_MM*mm)
 
-                if is_image_field and is_url(value):
-                    if "assinatura" in label.lower():
-                        img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=SIGNATURE_MAX_H, align_center=True)
-                    else:
-                        img_obj = fetch_image(value, max_w=IMG_MAX_W, max_h=IMG_MAX_H)
-                    pairs.append((label, img_obj if img_obj else value))
-                    i += 2
-                    continue
+            # ----- Blocos de grupos -----
+            for group_labels in GROUPS:
+                tbl, used = make_inline_group_block(group_labels, index, pockets, available_width)
+                if tbl:
+                    story.append(tbl)
+                    story.append(Spacer(1, 4*mm))
 
-                pairs.append((label, value if value else "-"))
-                i += 2
-            else:
-                i += 1
+            # ----- Blocos de produtos -----
+            if products:
+                story.append(Paragraph("Produtos Utilizados", styles["SectionTitle"]))
+                story.append(Spacer(1, 2*mm))
 
-        # 1) Separar blocos de produto (1..11) e demais perguntas
-        products, rest_pairs = extract_products_and_rest(pairs, max_products=11)
+                for prod in products:
+                    tbl_prod = make_product_block_table(prod["items"], available_width)
+                    story.append(tbl_prod)
+                    story.append(Spacer(1, PRODUCT_SPACER))
 
-        # 2) Dentro de "demais perguntas", organizar os grupos pedidos
-        index, pockets = build_lookup(rest_pairs)
+            # ----- Resto dos campos (Q&A comuns) -----
+            leftover_pairs = list(index.values())
 
-        # ===== Montagem do PDF =====
-        story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
-        avail_w = PAGE_W - (2 * MARGIN_SIDE_MM * mm)
+            if leftover_pairs:
+                story.append(Paragraph("Informações Complementares", styles["SectionTitle"]))
+                story.append(Spacer(1, 2*mm))
 
-        # (A) Grupos visuais das "demais informações"
-        story.append(Paragraph("Informações Gerais", styles["SectionTitle"]))
-        for group in GROUPS:
-            tbl, _ = make_inline_group_block(group, index, pockets, avail_w)
-            if tbl:
+                tbl = make_qa_table(leftover_pairs, pairs_per_row=1, available_width=available_width)
                 story.append(tbl)
-                story.append(Spacer(1, PRODUCT_SPACER))
 
-        # (B) O que sobrar das "demais informações" vai para Q&A padrão
-        remaining_pairs = list(index.values())  # ainda crus
-        if remaining_pairs:
-            story.append(Paragraph("Detalhes", styles["SectionTitle"]))
-            qa_table = make_qa_table(remaining_pairs, 2, avail_w)
-            story += [qa_table, Spacer(1, 3)]
+            # Salvar o PDF
+            doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
 
-        # (C) Depois os blocos de produto (apenas os com resposta)
-        if products:
-            story.append(Paragraph("Especificações dos Produtos", styles["SectionTitle"]))
-            for p in products:
-                block_tbl = make_product_block_table(p["items"], avail_w)
-                story.append(block_tbl)
-                story.append(Spacer(1, PRODUCT_SPACER))
-            story.append(Spacer(1, PRODUCT_SPACER))
+            filename = f"registro_{col_index+1}.pdf"
+            zipf.writestr(filename, pdf_buffer.getvalue())
 
-        doc = SimpleDocTemplate(
-            pdf_file_name,
-            pagesize=PAGE_SIZE,
-            leftMargin=MARGIN_SIDE_MM*mm, rightMargin=MARGIN_SIDE_MM*mm,
-            topMargin=MARGIN_TOP_MM*mm, bottomMargin=MARGIN_BOTTOM_MM*mm,
-            title=REPORT_TITLE,
-        )
-        doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
-        generated_files.append(pdf_file_name)
+    st.download_button(
+        "Baixar ZIP com PDFs",
+        data=zip_buffer.getvalue(),
+        file_name="relatorios_otm.zip",
+        mime="application/zip"
+    )
 
-        progress.progress(idx / total)
-
-    if generated_files:
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zf:
-            for file_path in generated_files:
-                zf.write(file_path, os.path.basename(file_path))
-        zip_buffer.seek(0)
-
-        st.success(f"{len(generated_files)} PDFs gerados com sucesso!")
-        st.download_button(
-            label="📦 Baixar todos os PDFs (.zip)",
-            data=zip_buffer,
-            file_name="relatorios_individuais.zip",
-            mime="application/zip"
-        )
-    else:
-        st.warning("Nenhum PDF foi gerado.")
+    st.success("Arquivos gerados com sucesso!")
