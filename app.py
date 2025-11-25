@@ -467,7 +467,7 @@ if uploaded_file:
             index, pockets = build_lookup(rest_pairs)
 
             # ===== Montagem do PDF =====
-            reg_id = normalize_value(row[0]) if len(row) > 0 else f"registro_{r_index - 1}"
+            reg_id = normalize_value(row[0]) if len(row) > 0 else f"registro_{r_index - 5}"
             pdf_file_name = f"{output_dir}/relatorio_{reg_id}.pdf"
 
             story = [Paragraph(f"Registro {reg_id}", styles["ReportTitle"]), Spacer(1, 3)]
@@ -523,6 +523,7 @@ if uploaded_file:
                 file_name="relatorios_individuais.zip",
                 mime="application/zip"
             )
+
 
 
 
