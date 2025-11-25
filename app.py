@@ -506,7 +506,7 @@ if st.button("🚀 Gerar PDFs"):
         remaining_pairs = list(index.values())  # ainda crus
         if remaining_pairs:
             story.append(Paragraph("Detalhes", styles["SectionTitle"]))
-            qa_table = make_qa_table(remaining_pairs, 2, avail_w)
+            qa_table = make_qa_table(remaining_pairs, 1, avail_w)
             story += [qa_table, Spacer(1, 3)]
 
         # (C) Depois os blocos de produto (apenas os com resposta)
@@ -546,4 +546,5 @@ if st.button("🚀 Gerar PDFs"):
         )
     else:
         st.warning("Nenhum PDF foi gerado.")
+
 
