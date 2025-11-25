@@ -34,7 +34,7 @@ MARGIN_SIDE_MM = 14.0
 REPORT_TITLE = "Tratamento de Sementes (Resumo por Registro)"
 LOGO_URL = "https://app.agrireport.agr.br/customers/picture/16?time=1759945360"
 LOGO_HEIGHT_MM = 15.0
-IMG_MAX_W = 100 * mm
+IMG_MAX_W = 120 * mm
 IMG_MAX_H = 70 * mm
 SIGNATURE_MAX_H = 25 * mm
 
@@ -546,6 +546,7 @@ if st.button("🚀 Gerar PDFs"):
         )
     else:
         st.warning("Nenhum PDF foi gerado.")
+
 
 
 
