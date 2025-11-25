@@ -448,7 +448,7 @@ if st.button("🚀 Gerar PDFs"):
         pairs = []
 
         # Campo fixo de exemplo (mantendo posição original: coluna C -> índice 2)
-        user_name = normalize_value(row_full[2]) if len(row_full) > 2 else "-"
+        user_name = normalize_value(row_full[8]) if len(row_full) > 2 else "-"
         pairs.append(("Usuário:", user_name))
 
         # --- AQUI: lemos apenas a partir da coluna J (índice 9) para montar os pares Q/A ---
@@ -546,3 +546,4 @@ if st.button("🚀 Gerar PDFs"):
         )
     else:
         st.warning("Nenhum PDF foi gerado.")
+
